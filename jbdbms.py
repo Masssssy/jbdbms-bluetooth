@@ -6,12 +6,40 @@ import argparse
 import sys
 import time
 import binascii
+import paho.mqtt.client as mqtt
+from datetime import datetime
 
 parser = argparse.ArgumentParser(description='Pull data from JBDBMS (also known as eg. LLT BMS) via bluetooth')
 parser.add_argument("-a", "--address", help="Device BLE Address", required=True)
 parser.add_argument("-i", "--interval", type=int, help="Data fetch interval", required=True)
 args = parser.parse_args()
 
+# MQTT 
+broker = "x.x.x.x"
+port = 1883
+topic = "esk8/battery"
+client_id = "electric-skateboard-battery"
+
+def connect_mqtt():
+    def on_connect(client, userdata, flags, rc):
+        if rc == 0:
+            print("Connected to MQTT Broker!")
+        else:
+            print("Failed to connect, return code %d\n", rc)
+
+    client = mqtt.Client(client_id)
+    client.on_connect = on_connect
+    print("connect mqtt")
+    client.connect(broker, port)
+    return client
+
+def publish_mqtt(clienti, topic, msg):
+    result = client.publish(topic, msg)
+    status = result[0]
+    if status == 0:
+      print(f"Send `{msg}` to topic `{topic}`")
+    else:
+      print(f"Failed to send message to topic {topic}")
 
 def bmsinfo(data):
     offset = 4  # skip header
@@ -78,14 +106,16 @@ def cellvoltages(celldata):
     i = 1
     for cell in cells:
         print("Cell " + str(i) + " " + str(cell/1000) + " V")
+        publish_mqtt(client, topic+"/cell"+str(i), str(cell/1000))
         i+=1
+    publish_mqtt(client, topic + "/lastupdate", datetime.now().ctime())
 
 class MyDelegate(DefaultDelegate):
     buffer = b''
     def __init__(self):
         DefaultDelegate.__init__(self)
     def handleNotification(self, cHandle, data):
-        #print("GOT NOTIFICATION")
+       # print("GOT NOTIFICATION")
         hex_data = binascii.hexlify(data)
         #print(str(hex_data))
 
@@ -101,6 +131,10 @@ class MyDelegate(DefaultDelegate):
                 bmsinfo(binascii.unhexlify(self.buffer))
                 self.buffer = b''
 
+# Start up mqtt client
+client = connect_mqtt()
+client.loop_start()
+
 try:
     print('attempting to connect')
     bms = Peripheral(args.address,addrType="public")
@@ -109,7 +143,6 @@ except BTLEException as ex:
     exit()
 else:
     print('connected to ',args.address)
-
 
 bms.setDelegate(MyDelegate())
 
